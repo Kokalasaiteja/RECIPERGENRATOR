@@ -22,7 +22,7 @@ function App() {
         };
 
         try {
-            const res = await axios.post('http://localhost:5000/api/generate', payload);
+            const res = await axios.post('https://recipergenrator.onrender.com/api/generate', payload);
             if (res.data.response) {
                 // Parse the response to handle YouTube thumbnails
                 let lines = res.data.response.split('\n');
@@ -95,8 +95,8 @@ function App() {
         dangerouslySetInnerHTML = {
             { __html: response }
         }
-        /> <
-        /div>
+        /> < /
+        div >
     );
 }
 
