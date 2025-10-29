@@ -1,0 +1,68 @@
+body {
+    margin: 0;
+    font-family: "Poppins", sans-serif;
+    background: linear-gradient(270deg, #ff8a00, #e52e71, #6a11cb, #2575fc);
+    background-size: 800% 800%;
+    animation: gradientFlow 10s ease infinite;
+    color: white;
+}
+
+@keyframes gradientFlow {
+    0% {
+        background-position: 0% 50%;
+    }
+    50% {
+        background-position: 100% 50%;
+    }
+    100% {
+        background-position: 0% 50%;
+    }
+}
+
+.container {
+    text-align: center;
+    padding: 50px;
+}
+
+.form {
+    margin-top: 30px;
+}
+
+input {
+    width: 70%;
+    padding: 10px;
+    margin: 10px;
+    border-radius: 8px;
+    border: none;
+    font-size: 16px;
+}
+
+button {
+    background: linear-gradient(45deg, #6a11cb, #2575fc);
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: 0.3s;
+}
+
+button:hover:not(:disabled) {
+    transform: scale(1.05);
+    background: linear-gradient(45deg, #ff8a00, #e52e71);
+}
+
+button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+#output {
+    margin-top: 30px;
+    text-align: left;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 20px;
+    border-radius: 10px;
+    white-space: pre-wrap;
+}
