@@ -32,7 +32,7 @@ const recipeSchema = new mongoose.Schema({
 const Recipe = mongoose.model('Recipe', recipeSchema);
 
 // Configure Google Generative AI
-const genai = new GoogleGenerativeAI("AIzaSyCwYMbe13yOedIvoHdtsA5hn8F-AAuoGSs");
+const genai = new GoogleGenerativeAI("AIzaSyD5CWPwFlpv1-zALQFef8NhKl1HYGKaTsg");
 
 // YouTube API setup
 const YOUTUBE_API_KEY = "AIzaSyAZdwM5vH9HB_28_-NAwmDFbDzHX7gylpg";
