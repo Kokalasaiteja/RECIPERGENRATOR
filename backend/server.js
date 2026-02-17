@@ -1,95 +1,27 @@
 const express = require('express');
 const cors = require('cors');
-const rateLimit = require('express-rate-limit');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { google } = require('googleapis');
-const mongoose = require('mongoose');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-/* ================================
-   SECURITY MIDDLEWARE
-================================ */
-
-// Restrict CORS (Set FRONTEND_URL in Render)
+// Middleware
 app.use(cors({
-    origin: process.env.FRONTEND_URL || '*',
+    origin: '*',
 }));
-
-// Rate Limiting
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100
-});
-app.use(limiter);
-
 app.use(express.json());
 
-/* ================================
-   ENV VALIDATION
-================================ */
-
-if (!process.env.GEMINI_API_KEY) {
-    console.error("Missing GEMINI_API_KEY");
-    process.exit(1);
-}
-
-if (!process.env.YOUTUBE_API_KEY) {
-    console.error("Missing YOUTUBE_API_KEY");
-    process.exit(1);
-}
-
-if (!process.env.MONGODB_URI) {
-    console.error("Missing MONGODB_URI");
-    process.exit(1);
-}
-
-/* ================================
-   DATABASE CONNECTION
-================================ */
-
-mongoose.connect(process.env.MONGODB_URI)
-    .then(() => console.log('MongoDB connected'))
-    .catch(err => {
-        console.error('MongoDB connection error:', err.message);
-        process.exit(1);
-    });
-
-/* ================================
-   SCHEMA
-================================ */
-
-const recipeSchema = new mongoose.Schema({
-    ingredients: String,
-    preferences: String,
-    time: String,
-    cuisine: String,
-    response: String,
-    createdAt: { type: Date, default: Date.now }
-});
-
-const Recipe = mongoose.model('Recipe', recipeSchema);
-
-/* ================================
-   GOOGLE AI SETUP
-================================ */
-
+// Configure Google Generative AI
 const genai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-/* ================================
-   YOUTUBE API SETUP
-================================ */
-
+// YouTube API setup
 const youtube = google.youtube({
     version: 'v3',
     auth: process.env.YOUTUBE_API_KEY
 });
 
-/* ================================
-   ROUTES
-================================ */
-
+// Routes
 app.get('/', (req, res) => {
     res.json({ message: 'Recipe Ideas API Running 🚀' });
 });
@@ -104,20 +36,24 @@ app.post('/api/generate', async (req, res) => {
 
         const prompt = `
 You are a professional chef assistant.
-Generate exactly 3 recipes using: ${ingredients}.
+Generate exactly 3 recipes using these ingredients: ${ingredients}.
 Preferences: ${preferences}. Cuisine: ${cuisine}. Max cooking time: ${time} minutes.
 
-Rules:
-1. First recipe title must remain unchanged.
-2. Other two can be variations.
-3. All must be realistic and edible.
-Plain text only.
+For each recipe provide:
+1. 🍽️ Recipe Title
+2. ⏱️ Estimated Time
+3. 🛒 Ingredients List
+4. 👨‍🍳 Steps
+5. 🛍️ Missing Ingredients
+6. 💡 Short Note or Tip
 `;
 
         const model = genai.getGenerativeModel({ model: "gemini-2.5-flash" });
         const result = await model.generateContent(prompt);
-        const recipesText = result.response.text();
+        const response = await result.response;
+        const recipesText = response.text();
 
+        // Extract titles
         const matches = recipesText.match(/🍽️ (.*?)\n/g);
         const recipeTitles = matches
             ? matches.map(match => match.replace('🍽️ ', '').trim())
@@ -129,43 +65,28 @@ Plain text only.
             const title = recipeTitles[i];
             const { videoUrl, thumbnailUrl } = await searchYouTubeVideo(title);
 
-            enhancedRecipes.push(
-                recipesText.split('\n\n')[i] +
-                `\n📺 YouTube: ${videoUrl}\n🖼️ Thumbnail: ${thumbnailUrl}`
-            );
+            const recipeBlocks = recipesText.split('\n\n');
+            if (recipeBlocks[i]) {
+                const enhancedRecipe =
+                    recipeBlocks[i] +
+                    `\n7. 📺 YouTube Video Link: ${videoUrl}` +
+                    `\n8. 🖼️ YouTube Thumbnail: ${thumbnailUrl}`;
+
+                enhancedRecipes.push(enhancedRecipe);
+            }
         }
 
         const enhancedResponse = enhancedRecipes.join('\n\n');
 
-        await Recipe.create({
-            ingredients,
-            preferences,
-            time,
-            cuisine,
-            response: enhancedResponse
-        });
-
         res.json({ response: enhancedResponse });
 
     } catch (error) {
-        console.error("Error generating recipe:", error.message);
-        res.status(500).json({ error: "Internal Server Error" });
+        console.error('Error generating recipe:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
-app.get('/api/recipes', async (req, res) => {
-    try {
-        const recipes = await Recipe.find().sort({ createdAt: -1 });
-        res.json(recipes);
-    } catch (error) {
-        res.status(500).json({ error: "Error fetching recipes" });
-    }
-});
-
-/* ================================
-   YOUTUBE SEARCH FUNCTION
-================================ */
-
+// YouTube Search Function
 async function searchYouTubeVideo(query) {
     try {
         const response = await youtube.search.list({
@@ -176,26 +97,21 @@ async function searchYouTubeVideo(query) {
             maxResults: 1
         });
 
-        if (response.data.items.length > 0) {
+        if (response.data.items && response.data.items.length > 0) {
             const videoId = response.data.items[0].id.videoId;
+            const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+            const thumbnailUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
 
-            return {
-                videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
-                thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`
-            };
+            return { videoUrl, thumbnailUrl };
         }
 
         return { videoUrl: "No video found", thumbnailUrl: "" };
 
     } catch (error) {
-        console.error("YouTube API error:", error.message);
+        console.error('YouTube API error:', error);
         return { videoUrl: "Error fetching video", thumbnailUrl: "" };
     }
 }
-
-/* ================================
-   START SERVER
-================================ */
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
