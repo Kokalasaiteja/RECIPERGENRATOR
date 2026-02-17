@@ -1,5 +1,8 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { google } = require('googleapis');
 const mongoose = require('mongoose');
@@ -7,18 +10,58 @@ const mongoose = require('mongoose');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
+/* ================================
+   SECURITY MIDDLEWARE
+================================ */
+
+// Restrict CORS (Replace with your Vercel URL)
 app.use(cors({
-    origin: '*',
+    origin: process.env.FRONTEND_URL || '*',
 }));
+
+// Rate Limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 100
+});
+app.use(limiter);
+
 app.use(express.json());
 
-// MongoDB connection (optional)
-mongoose.connect('mongodb://localhost:27017/recipe-ideas')
-    .then(() => console.log('MongoDB connected'))
-    .catch(err => console.log('MongoDB not available, running without database'));
+/* ================================
+   ENV VALIDATION
+================================ */
 
-// Recipe Schema
+if (!process.env.GEMINI_API_KEY) {
+    console.error("Missing GEMINI_API_KEY in environment variables");
+    process.exit(1);
+}
+
+if (!process.env.YOUTUBE_API_KEY) {
+    console.error("Missing YOUTUBE_API_KEY in environment variables");
+    process.exit(1);
+}
+
+if (!process.env.MONGODB_URI) {
+    console.error("Missing MONGODB_URI in environment variables");
+    process.exit(1);
+}
+
+/* ================================
+   DATABASE CONNECTION
+================================ */
+
+mongoose.connect(process.env.MONGODB_URI)
+    .then(() => console.log('MongoDB connected'))
+    .catch(err => {
+        console.error('MongoDB connection error:', err.message);
+        process.exit(1);
+    });
+
+/* ================================
+   SCHEMA
+================================ */
+
 const recipeSchema = new mongoose.Schema({
     title: String,
     ingredients: String,
@@ -31,22 +74,30 @@ const recipeSchema = new mongoose.Schema({
 
 const Recipe = mongoose.model('Recipe', recipeSchema);
 
-// Configure Google Generative AI
-const genai = new GoogleGenerativeAI("AIzaSyD5CWPwFlpv1-zALQFef8NhKl1HYGKaTsg");
+/* ================================
+   GOOGLE AI SETUP
+================================ */
 
-// YouTube API setup
-const YOUTUBE_API_KEY = "AIzaSyAZdwM5vH9HB_28_-NAwmDFbDzHX7gylpg";
+const genai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+/* ================================
+   YOUTUBE API SETUP
+================================ */
+
 const youtube = google.youtube({
     version: 'v3',
-    auth: YOUTUBE_API_KEY
+    auth: process.env.YOUTUBE_API_KEY
 });
 
-// Routes
+/* ================================
+   ROUTES
+================================ */
+
 app.get('/', (req, res) => {
-    res.json({ message: 'Recipe Ideas API' });
+    res.json({ message: 'Recipe Ideas API Running Securely 🚀' });
 });
 
-app.post('/api/generate', async(req, res) => {
+app.post('/api/generate', async (req, res) => {
     try {
         const { ingredients, preferences, time, cuisine } = req.body;
 
@@ -56,80 +107,72 @@ app.post('/api/generate', async(req, res) => {
 
         const prompt = `
 You are a professional chef assistant.
-Your task is to generate exactly 3 recipes using these ingredients: ${ingredients}.
+Generate exactly 3 recipes using: ${ingredients}.
 Preferences: ${preferences}. Cuisine: ${cuisine}. Max cooking time: ${time} minutes.
 
-Important rules:
-1. The first recipe MUST have the exact same title as provided by the user. Do NOT change, expand, or creatively reinterpret the title. For example, if the title is "potato fry", it must remain "potato fry" — not "potato fry manchurian" or "crispy potato fry delight".
-2. The other two recipes can be creative variations or related dishes using the same ingredients.
-3. All recipes must be realistic and edible.
-
-For each recipe, provide (plain text only, no markdown formatting):
-1. 🍽️ Recipe Title
-2. ⏱️ Estimated Time
-3. 🛒 Ingredients List
-4. 👨‍🍳 Steps
-5. 🛍️ Missing Ingredients
-6. 💡 Short Note or Tip
+Rules:
+1. First recipe title must remain unchanged.
+2. Other two can be variations.
+3. All must be realistic and edible.
+Provide plain text only.
 `;
 
         const model = genai.getGenerativeModel({ model: "gemini-2.5-flash" });
         const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const recipesText = response.text();
+        const recipesText = result.response.text();
 
-        // Parse the response to extract recipe titles
         const matches = recipesText.match(/🍽️ (.*?)\n/g);
-        const recipeTitles = matches ? matches.map(match => match.replace('🍽️ ', '').trim()) : [];
+        const recipeTitles = matches
+            ? matches.map(match => match.replace('🍽️ ', '').trim())
+            : [];
 
-        // For each recipe, get YouTube link and thumbnail
         const enhancedRecipes = [];
+
         for (let i = 0; i < Math.min(recipeTitles.length, 3); i++) {
             const title = recipeTitles[i];
             const { videoUrl, thumbnailUrl } = await searchYouTubeVideo(title);
 
-            // Split recipes by double newlines
             const recipeBlocks = recipesText.split('\n\n');
+
             if (recipeBlocks[i]) {
-                const enhancedRecipe = recipeBlocks[i] + `\n7. 📺 YouTube Video Link: ${videoUrl}\n8. 🖼️ YouTube Thumbnail: ${thumbnailUrl}`;
-                enhancedRecipes.push(enhancedRecipe);
+                enhancedRecipes.push(
+                    recipeBlocks[i] +
+                    `\n📺 YouTube: ${videoUrl}\n🖼️ Thumbnail: ${thumbnailUrl}`
+                );
             }
         }
 
         const enhancedResponse = enhancedRecipes.join('\n\n');
 
-        // Save the generated recipe to database (optional)
-        try {
-            const newRecipe = new Recipe({
-                ingredients,
-                preferences,
-                time,
-                cuisine,
-                response: enhancedResponse
-            });
-            await newRecipe.save();
-        } catch (saveError) {
-            console.error('Error saving recipe to database:', saveError.message);
-            // Continue without saving
-        }
+        // Save to DB
+        await Recipe.create({
+            ingredients,
+            preferences,
+            time,
+            cuisine,
+            response: enhancedResponse
+        });
 
         res.json({ response: enhancedResponse });
+
     } catch (error) {
-        console.error('Error generating recipe:', error);
-        res.status(500).json({ error: error.message });
+        console.error("Error generating recipe:", error.message);
+        res.status(500).json({ error: "Internal Server Error" });
     }
 });
 
-// Route to get saved recipes
-app.get('/api/recipes', async(req, res) => {
+app.get('/api/recipes', async (req, res) => {
     try {
         const recipes = await Recipe.find().sort({ createdAt: -1 });
         res.json(recipes);
     } catch (error) {
-        console.error('Error fetching recipes:', error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: "Error fetching recipes" });
     }
 });
+
+/* ================================
+   YOUTUBE SEARCH FUNCTION
+================================ */
 
 async function searchYouTubeVideo(query) {
     try {
@@ -141,18 +184,25 @@ async function searchYouTubeVideo(query) {
             maxResults: 1
         });
 
-        if (response.data.items && response.data.items.length > 0) {
+        if (response.data.items.length > 0) {
             const videoId = response.data.items[0].id.videoId;
-            const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-            const thumbnailUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-            return { videoUrl, thumbnailUrl };
+            return {
+                videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
+                thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`
+            };
         }
+
         return { videoUrl: "No video found", thumbnailUrl: "" };
+
     } catch (error) {
-        console.error('YouTube API error:', error);
-        return { videoUrl: `Error fetching video: ${error.message}`, thumbnailUrl: "" };
+        console.error("YouTube API error:", error.message);
+        return { videoUrl: "Error fetching video", thumbnailUrl: "" };
     }
 }
+
+/* ================================
+   START SERVER
+================================ */
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
