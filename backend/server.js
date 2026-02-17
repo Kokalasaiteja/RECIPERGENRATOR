@@ -1,5 +1,3 @@
-require('dotenv').config();
-
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
@@ -14,7 +12,7 @@ const PORT = process.env.PORT || 5000;
    SECURITY MIDDLEWARE
 ================================ */
 
-// Restrict CORS (Replace with your Vercel URL)
+// Restrict CORS (Set FRONTEND_URL in Render)
 app.use(cors({
     origin: process.env.FRONTEND_URL || '*',
 }));
@@ -33,17 +31,17 @@ app.use(express.json());
 ================================ */
 
 if (!process.env.GEMINI_API_KEY) {
-    console.error("Missing GEMINI_API_KEY in environment variables");
+    console.error("Missing GEMINI_API_KEY");
     process.exit(1);
 }
 
 if (!process.env.YOUTUBE_API_KEY) {
-    console.error("Missing YOUTUBE_API_KEY in environment variables");
+    console.error("Missing YOUTUBE_API_KEY");
     process.exit(1);
 }
 
 if (!process.env.MONGODB_URI) {
-    console.error("Missing MONGODB_URI in environment variables");
+    console.error("Missing MONGODB_URI");
     process.exit(1);
 }
 
@@ -63,7 +61,6 @@ mongoose.connect(process.env.MONGODB_URI)
 ================================ */
 
 const recipeSchema = new mongoose.Schema({
-    title: String,
     ingredients: String,
     preferences: String,
     time: String,
@@ -94,7 +91,7 @@ const youtube = google.youtube({
 ================================ */
 
 app.get('/', (req, res) => {
-    res.json({ message: 'Recipe Ideas API Running Securely 🚀' });
+    res.json({ message: 'Recipe Ideas API Running 🚀' });
 });
 
 app.post('/api/generate', async (req, res) => {
@@ -114,7 +111,7 @@ Rules:
 1. First recipe title must remain unchanged.
 2. Other two can be variations.
 3. All must be realistic and edible.
-Provide plain text only.
+Plain text only.
 `;
 
         const model = genai.getGenerativeModel({ model: "gemini-2.5-flash" });
@@ -132,19 +129,14 @@ Provide plain text only.
             const title = recipeTitles[i];
             const { videoUrl, thumbnailUrl } = await searchYouTubeVideo(title);
 
-            const recipeBlocks = recipesText.split('\n\n');
-
-            if (recipeBlocks[i]) {
-                enhancedRecipes.push(
-                    recipeBlocks[i] +
-                    `\n📺 YouTube: ${videoUrl}\n🖼️ Thumbnail: ${thumbnailUrl}`
-                );
-            }
+            enhancedRecipes.push(
+                recipesText.split('\n\n')[i] +
+                `\n📺 YouTube: ${videoUrl}\n🖼️ Thumbnail: ${thumbnailUrl}`
+            );
         }
 
         const enhancedResponse = enhancedRecipes.join('\n\n');
 
-        // Save to DB
         await Recipe.create({
             ingredients,
             preferences,
@@ -186,6 +178,7 @@ async function searchYouTubeVideo(query) {
 
         if (response.data.items.length > 0) {
             const videoId = response.data.items[0].id.videoId;
+
             return {
                 videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
                 thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`
